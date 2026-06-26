@@ -1,0 +1,16 @@
+[Unit]
+Description=Magma eBPF GTP-U session adapter (mirrors Magma's per-session flows into eBPF maps)
+Documentation=https://github.com/magma/magma/issues/15649
+# Needs the datapath infra up (veth/maps/OVS port) and OVS reachable.
+After=magma-ebpf-gtp.service openvswitch-switch.service
+Requires=magma-ebpf-gtp.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/magma/ebpf.env
+ExecStart=/usr/bin/python3 /var/opt/magma/ebpf/ebpf_session_adapter.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

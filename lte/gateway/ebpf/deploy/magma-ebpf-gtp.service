@@ -1,0 +1,22 @@
+[Unit]
+Description=Magma eBPF GTP-U datapath infrastructure (veth + TC programs + pinned maps + OVS port)
+Documentation=https://github.com/magma/magma/issues/15649
+# OVS must be up (gtp_br0 exists) and the network named before we attach.
+After=openvswitch-switch.service network-online.target
+Wants=network-online.target
+Requires=openvswitch-switch.service
+# Bring the datapath up before the Magma containers' control plane starts touching it.
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/magma/ebpf.env
+ExecStart=/usr/local/bin/setup-ebpf-gtp.sh
+ExecStop=/usr/local/bin/teardown-ebpf-gtp.sh
+# Re-attach if a transient setup failure occurs (e.g. OVS not ready yet).
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
