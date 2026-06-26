@@ -1,0 +1,29 @@
+---
+# Magma eBPF GTP-U datapath role.
+# Adds the eBPF datapath + session adapter; keeps Magma's OVS userspace patches; disables the
+# eBPF-replaced kernel GTP vport (gtp0). Does NOT modify or rebuild any Magma container.
+
+- name: Auto-detect S1-U/N3 (gNB-facing) interface when not set
+  ansible.builtin.shell: |
+    set -e
+    iface=$(awk '/^[[:space:]]*enodeb_iface[[:space:]]*:/{print $2}' /etc/magma/pipelined.yml 2>/dev/null | tr -d '"' | head -1)
+    if [ -z "$iface" ] || ! ip link show "$iface" >/dev/null 2>&1; then
+      def=$(ip route show default | awk '{print $5}' | head -1)
+      for i in $(ls /sys/class/net | grep -E '^(eth|ens|enp|eno)'); do [ "$i" = "$def" ] || { iface="$i"; break; }; done
+    fi
+    echo "$iface"
+  register: ebpf_s1u_detected
+  changed_when: false
+  when: ebpf_s1u_iface | length == 0
+
+- name: Set effective S1-U interface
+  ansible.builtin.set_fact:
+    ebpf_s1u_iface_eff: "{{ ebpf_s1u_iface if (ebpf_s1u_iface | length > 0) else (ebpf_s1u_detected.stdout | trim) }}"
+
+- name: Resolved datapath parameters
+  ansible.builtin.debug:
+    msg: "S1-U/N3={{ ebpf_s1u_iface_eff }} bridge={{ ebpf_ovs_bridge }} ue_subnet={{ ebpf_ue_subnet }}"
+
+- ansible.builtin.import_tasks: install_dependencies.yml
+- ansible.builtin.import_tasks: deploy_bpf.yml
+- ansible.builtin.import_tasks: manage_services.yml

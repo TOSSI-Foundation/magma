@@ -1,0 +1,22 @@
+---
+# Magma eBPF GTP-U datapath — role defaults.
+# Source tree on the control node (lte/gateway/ebpf), resolved from this role's location.
+ebpf_repo_dir: "{{ (role_path ~ '/../../..') | realpath }}"
+ebpf_stage_dir: /usr/src/magma-ebpf
+ebpf_install_dir: /var/opt/magma/ebpf
+ebpf_bin_dir: /usr/local/bin
+ebpf_unit_dir: /etc/systemd/system
+ebpf_env_file: /etc/magma/ebpf.env
+
+# Datapath parameters (all auto-resolved; override only if needed).
+ebpf_s1u_iface: ""                 # gNB/eNB-facing N3/S1-U iface; auto-detected when empty
+ebpf_ovs_bridge: gtp_br0
+ebpf_ovs_veth: gtp_veth0
+ebpf_ue_subnet: 192.168.128.0/24
+ebpf_adapter_poll: 3
+
+# Toolchain.
+ebpf_libbpf_version: v1.3.0
+
+# Remove the eBPF-replaced kernel GTP vport (gtp0). Keeps Magma's OVS *userspace* patches.
+ebpf_disable_gtp0: true

@@ -1,0 +1,11 @@
+---
+# Deploy the Magma eBPF GTP-U datapath onto a Docker AGW.
+#   ansible-playbook -i <your-inventory> deploy_ebpf.yml
+# Idempotent; safe to re-run. Brings up the datapath + session adapter via systemd so an external
+# gNB / gNB-simulator attaching a UE through the stock Magma AGW is auto-programmed into eBPF.
+- name: Deploy the Magma eBPF GTP-U datapath
+  hosts: gateway
+  become: true
+  roles:
+    - role: ebpf
+      tags: [ebpf]

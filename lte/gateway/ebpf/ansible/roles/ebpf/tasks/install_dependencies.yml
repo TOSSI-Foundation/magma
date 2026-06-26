@@ -1,0 +1,48 @@
+---
+# Build/runtime dependencies for the eBPF datapath.
+
+- name: Install eBPF build dependencies
+  ansible.builtin.apt:
+    name: [clang, llvm, gcc, make, git, pkg-config, libelf-dev, zlib1g-dev]
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Install kernel-matched bpftool (linux-tools)
+  ansible.builtin.apt:
+    name: "linux-tools-{{ ansible_kernel }}"
+    state: present
+  failed_when: false          # falls back to any installed /usr/lib/linux-tools/*/bpftool
+  when: ansible_os_family == "Debian"
+
+- name: Check for libbpf >= 1.x
+  ansible.builtin.find:
+    paths: /usr/local/lib
+    patterns: "libbpf.so.1*"
+  register: ebpf_libbpf_found
+
+- name: Build + install libbpf {{ ebpf_libbpf_version }} from source (focal apt 0.5 is too old)
+  when: ebpf_libbpf_found.matched | int == 0
+  block:
+    - name: Clone libbpf
+      ansible.builtin.git:
+        repo: https://github.com/libbpf/libbpf
+        version: "{{ ebpf_libbpf_version }}"
+        dest: /usr/src/libbpf
+        depth: 1
+
+    - name: make install libbpf (lib + headers)
+      ansible.builtin.command:
+        cmd: make install install_headers PREFIX=/usr/local LIBDIR=/usr/local/lib
+        chdir: /usr/src/libbpf/src
+      changed_when: true
+
+    - name: Register /usr/local/lib with the dynamic linker
+      ansible.builtin.copy:
+        dest: /etc/ld.so.conf.d/libbpf.conf
+        content: "/usr/local/lib\n"
+        mode: "0644"
+
+    - name: ldconfig
+      ansible.builtin.command: ldconfig
+      changed_when: true

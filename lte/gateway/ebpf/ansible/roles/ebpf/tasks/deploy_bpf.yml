@@ -1,0 +1,91 @@
+---
+# Build the eBPF objects + loader, deploy artifacts, render config, install systemd units,
+# and remove the eBPF-replaced gtp0 vport.
+
+- name: Resolve a usable bpftool (kernel-bump-safe)
+  ansible.builtin.shell: |
+    if command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1; then command -v bpftool;
+    else ls /usr/lib/linux-tools/*/bpftool 2>/dev/null | sort -V | tail -1; fi
+  register: ebpf_bpftool_path
+  changed_when: false
+
+- name: Set bpftool fact
+  ansible.builtin.set_fact:
+    ebpf_bpftool: "{{ ebpf_bpftool_path.stdout | trim }}"
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ebpf_install_dir }}"
+    - "{{ ebpf_stage_dir }}"
+    - /etc/magma
+
+- name: Stage eBPF source on the target
+  ansible.builtin.copy:
+    src: "{{ ebpf_repo_dir }}/{{ item }}"
+    dest: "{{ ebpf_stage_dir }}/"
+    mode: preserve
+  loop: [bpf, src, python, deploy]
+
+- name: Compile eBPF objects (gtp_decap/encap/mark)
+  ansible.builtin.command:
+    cmd: make
+    chdir: "{{ ebpf_stage_dir }}/bpf"
+  changed_when: true
+
+- name: Build tc_loader
+  ansible.builtin.command:
+    cmd: "gcc src/tc_loader.c -I/usr/local/include -L/usr/local/lib -lbpf -lelf -lz -o {{ ebpf_install_dir }}/tc_loader"
+    chdir: "{{ ebpf_stage_dir }}"
+  changed_when: true
+
+- name: Install objects + control plane
+  ansible.builtin.copy:
+    src: "{{ ebpf_stage_dir }}/{{ item.s }}"
+    dest: "{{ ebpf_install_dir }}/{{ item.d }}"
+    remote_src: true
+    mode: "{{ item.m }}"
+  loop:
+    - { s: bpf/gtp_decap.o, d: gtp_decap.o, m: "0644" }
+    - { s: bpf/gtp_encap.o, d: gtp_encap.o, m: "0644" }
+    - { s: bpf/gtp_mark.o,  d: gtp_mark.o,  m: "0644" }
+    - { s: python/ebpf_control.py, d: ebpf_control.py, m: "0755" }
+    - { s: python/ebpf_session_adapter.py, d: ebpf_session_adapter.py, m: "0755" }
+
+- name: Point ebpf_control at the working bpftool
+  ansible.builtin.replace:
+    path: "{{ ebpf_install_dir }}/ebpf_control.py"
+    regexp: '"bpftool"'
+    replace: '"{{ ebpf_bpftool }}"'
+
+- name: Install deploy scripts
+  ansible.builtin.copy:
+    src: "{{ ebpf_stage_dir }}/deploy/{{ item }}"
+    dest: "{{ ebpf_bin_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0755"
+  loop: [setup-ebpf-gtp.sh, teardown-ebpf-gtp.sh, install-ebpf-ovs-flows.sh]
+
+- name: Render datapath env file
+  ansible.builtin.template:
+    src: ebpf.env.j2
+    dest: "{{ ebpf_env_file }}"
+    mode: "0644"
+  notify: restart ebpf datapath
+
+- name: Install systemd units
+  ansible.builtin.copy:
+    src: "{{ ebpf_stage_dir }}/deploy/{{ item }}"
+    dest: "{{ ebpf_unit_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0644"
+  loop: [magma-ebpf-gtp.service, magma-ebpf-adapter.service]
+  notify: reload systemd
+
+- name: Remove the eBPF-replaced gtp0 vport (keep OVS userspace patches)
+  ansible.builtin.command: "ovs-vsctl --if-exists del-port {{ ebpf_ovs_bridge }} gtp0"
+  changed_when: false
+  when: ebpf_disable_gtp0 | bool
